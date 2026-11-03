@@ -17,6 +17,11 @@
 //   - POST /bridge/send: kirim balasan teks/file ke grup whitelist SAJA,
 //     selalu sebagai balasan (reply_to) atas pesan antrean yang nyata —
 //     bot TIDAK PERNAH memulai percakapan sendiri.
+//   - GET /bridge/media: unduh file foto/dokumen antrean lewat token server
+//     (butuh secret; file_id harus milik entri antrean).
+//   - Perintah bergambar (upgrade 2026-11-03): pesan foto/dokumen dengan
+//     caption mengandung "Bowo" ikut diantrekan (caption = teks perintah,
+//     file_id disimpan sebagai metadata media).
 //   - Katalog file (catalog.json): nama -> file repo / URL publik.
 //   - Rate limit + deduplikasi + pemisah pesan panjang + antre kirim.
 //
@@ -387,7 +392,15 @@ function markUpdateSeen(updateId) {
 // --- Penanganan update webhook (PERILAKU KERANGKA, dipertahankan). ---
 function handleUpdate(update) {
   const message = update && update.message;
-  if (!message || typeof message.text !== 'string') {
+  if (!message) {
+    return { queued: false, reason: 'not_a_message' };
+  }
+  // Perintah bisa berupa teks ATAU caption media (foto/dokumen).
+  // Pesan media tanpa caption tetap dibuang (tidak ada perintah).
+  // Upgrade 2026-11-03 atas perintah Pak: perintah gambar lewat grup.
+  const text = typeof message.text === 'string' ? message.text
+    : typeof message.caption === 'string' ? message.caption : null;
+  if (text === null) {
     return { queued: false, reason: 'not_a_text_message' };
   }
 
@@ -420,9 +433,23 @@ function handleUpdate(update) {
   }
 
   // DIAM total bila tidak ada kata "Bowo".
-  if (!TRIGGER_RE.test(message.text)) {
+  if (!TRIGGER_RE.test(text)) {
     log({ event: 'ignored', reason: 'no_trigger', chat_id: chatId, message_id: message.message_id });
     return { queued: false, reason: 'no_trigger' };
+  }
+
+  // Media lampiran (hanya metadata: jenis + file_id; byte file diambil
+  // agen lewat /bridge/media, token Telegram tidak pernah keluar server).
+  let media = null;
+  if (Array.isArray(message.photo) && message.photo.length > 0) {
+    const largest = message.photo[message.photo.length - 1];
+    if (largest && largest.file_id) media = { type: 'photo', file_id: largest.file_id };
+  } else if (message.document && message.document.file_id) {
+    media = {
+      type: 'document',
+      file_id: message.document.file_id,
+      mime: message.document.mime_type || null,
+    };
   }
 
   const entry = {
@@ -433,9 +460,10 @@ function handleUpdate(update) {
     chat_type: chatType,
     from_id: message.from ? message.from.id : null,
     from_username: message.from ? (message.from.username || null) : null,
-    text: message.text,
+    text,
     trigger: 'Bowo',
     kind: deriveKind(message.from ? message.from.id : null),
+    ...(media ? { media } : {}),
   };
   enqueue(entry);
   log({ event: 'queued', chat_id: chatId, message_id: message.message_id });
@@ -522,9 +550,81 @@ function handleBridgePending(req, res, url) {
       text: e.text,
       received_at: e.received_at,
       kind: deriveKind(e.from_id ?? null),
+      ...(e.media ? { media: e.media } : {}),
     }));
   log({ event: 'bridge_pending', count: entries.length });
   sendJson(res, 200, { ok: true, entries });
+}
+
+// GET /bridge/media?file_id=<id> — unduh file Telegram (foto/dokumen
+// antrean) lewat token server, untuk worker/agen. Token TIDAK PERNAH
+// keluar dari server; klien cukup pakai BRIDGE_SECRET. file_id HARUS
+// milik entri antrean (anti-penyalahgunaan).
+async function handleBridgeMedia(req, res, url) {
+  const fileId = url.searchParams.get('file_id') || '';
+  if (!fileId) {
+    sendJson(res, 400, { ok: false, error: 'bad_file_id' });
+    return;
+  }
+  if (!BOT_TOKEN) {
+    sendJson(res, 503, { ok: false, error: 'bot_not_configured' });
+    return;
+  }
+  const owned = readQueueEntries().some((e) => e.media && e.media.file_id === fileId);
+  if (!owned) {
+    sendJson(res, 400, { ok: false, error: 'unknown_file' });
+    return;
+  }
+  const info = await telegramApi('getFile', { file_id: fileId });
+  if (!info || !info.ok || !info.result || !info.result.file_path) {
+    sendJson(res, 400, { ok: false, error: 'file_not_found' });
+    return;
+  }
+  const buf = await downloadTelegramFile(info.result.file_path);
+  if (!buf) {
+    sendJson(res, 502, { ok: false, error: 'download_failed' });
+    return;
+  }
+  res.writeHead(200, {
+    'Content-Type': 'application/octet-stream',
+    'Content-Length': buf.length,
+    'Cache-Control': 'no-store',
+  });
+  res.end(buf);
+}
+
+function downloadTelegramFile(filePath) {
+  return new Promise((resolve) => {
+    const MAX = 20 * 1024 * 1024; // batas unduh Bot API
+    const req = https.request({
+      host: 'api.telegram.org',
+      path: `/file/bot${BOT_TOKEN}/${encodeURI(filePath)}`,
+      method: 'GET',
+      timeout: 60000,
+    }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        resolve(null);
+        return;
+      }
+      const chunks = [];
+      let total = 0;
+      let tooBig = false;
+      res.on('data', (c) => {
+        total += c.length;
+        if (total > MAX) {
+          tooBig = true;
+          req.destroy();
+          return;
+        }
+        chunks.push(c);
+      });
+      res.on('end', () => resolve(tooBig ? null : Buffer.concat(chunks)));
+    });
+    req.on('timeout', () => req.destroy(new Error('telegram_timeout')));
+    req.on('error', () => resolve(null));
+    req.end();
+  });
 }
 
 // POST /bridge/send — kirim SATU balasan atas SATU pesan antrean.
@@ -775,6 +875,11 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && url.pathname === '/bridge/send') {
     if (!checkBridgeAuth(req, res)) return;
     handleBridgeSend(req, res);
+    return;
+  }
+  if (req.method === 'GET' && url.pathname === '/bridge/media') {
+    if (!checkBridgeAuth(req, res)) return;
+    handleBridgeMedia(req, res, url);
     return;
   }
 

@@ -44,6 +44,8 @@
 
 const http = require('http');
 const https = require('https');
+const net = require('net');
+const tls = require('tls');
 const fs = require('fs');
 const path = require('path');
 
@@ -75,36 +77,122 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// --- Proxy egress (2026-11-03): VM ini hanya keluar lewat proxy HTTP
+// berautentikasi (env HTTPS_PROXY). curl memakainya otomatis, https.request
+// mentah tidak — koneksi langsung dicegat dan gagal TLS ("wrong version
+// number"). Untuk target https: CONNECT ke proxy dulu, lalu TLS di atas
+// terowongan. NO_PROXY dihormati (localhost/dll langsung). Nilai proxy
+// dibaca dari env saat jalan, tidak pernah ditulis di file repo. ---
+function proxyUrlFor(hostname) {
+  const raw = process.env.HTTPS_PROXY || process.env.https_proxy
+    || process.env.HTTP_PROXY || process.env.http_proxy;
+  if (!raw) return null;
+  const host = hostname.toLowerCase();
+  const rules = (process.env.NO_PROXY || process.env.no_proxy || '')
+    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  for (const rule of rules) {
+    if (rule === '*') return null;
+    const r = rule.startsWith('.') ? rule.slice(1) : rule;
+    if (host === r || host.endsWith(`.${r}`)) return null;
+  }
+  try {
+    return new URL(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+function connectTlsViaProxy(targetHost, targetPort, proxyUrl) {
+  return new Promise((resolve, reject) => {
+    const proxySocket = net.connect(Number(proxyUrl.port) || 80, proxyUrl.hostname, () => {
+      let auth = '';
+      if (proxyUrl.username || proxyUrl.password) {
+        auth = `Proxy-Authorization: Basic ${Buffer.from(
+          `${decodeURIComponent(proxyUrl.username)}:${decodeURIComponent(proxyUrl.password)}`,
+        ).toString('base64')}\r\n`;
+      }
+      proxySocket.write(
+        `CONNECT ${targetHost}:${targetPort} HTTP/1.1\r\nHost: ${targetHost}:${targetPort}\r\n${auth}\r\n`,
+      );
+    });
+    let buf = '';
+    const onData = (chunk) => {
+      buf += chunk.toString('utf8');
+      const end = buf.indexOf('\r\n\r\n');
+      if (end === -1) return;
+      proxySocket.removeListener('data', onData);
+      const statusLine = buf.slice(0, buf.indexOf('\r\n'));
+      const code = Number(statusLine.split(' ')[1] || '0');
+      if (code !== 200) {
+        proxySocket.destroy();
+        reject(new Error(`proxy_connect_status_${code}`));
+        return;
+      }
+      const tlsSocket = tls.connect({ socket: proxySocket, servername: targetHost });
+      tlsSocket.once('secureConnect', () => resolve(tlsSocket));
+      tlsSocket.once('error', reject);
+    };
+    proxySocket.on('data', onData);
+    proxySocket.on('error', reject);
+  });
+}
+
 function httpJson(method, urlString, headers, bodyObj, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const url = new URL(urlString);
-    const lib = url.protocol === 'https:' ? https : http;
+    let url;
+    try {
+      url = new URL(urlString);
+    } catch (e) {
+      reject(e);
+      return;
+    }
     const data = bodyObj !== undefined ? JSON.stringify(bodyObj) : null;
-    const req = lib.request({
-      host: url.hostname,
-      port: url.port || (url.protocol === 'https:' ? 443 : 80),
-      path: url.pathname + url.search,
-      method,
-      timeout: timeoutMs,
-      headers: {
-        ...(data ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } : {}),
-        ...headers,
-      },
-    }, (res) => {
-      const chunks = [];
-      res.on('data', (c) => chunks.push(c));
-      res.on('end', () => {
-        let parsed = null;
-        try {
-          parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-        } catch (e) { /* biarkan null */ }
-        resolve({ status: res.statusCode, body: parsed });
+    const startRequest = (extraOpts, tlsSocket) => {
+      const lib = url.protocol === 'https:' ? https : http;
+      const req = lib.request({
+        host: url.hostname,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80),
+        path: url.pathname + url.search,
+        method,
+        timeout: timeoutMs,
+        ...(extraOpts || {}),
+        headers: {
+          ...(data ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } : {}),
+          ...headers,
+        },
+      }, (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          let parsed = null;
+          try {
+            parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          } catch (e) { /* biarkan null */ }
+          resolve({ status: res.statusCode, body: parsed });
+        });
       });
-    });
-    req.on('timeout', () => req.destroy(new Error('timeout')));
-    req.on('error', reject);
-    if (data) req.write(data);
-    req.end();
+      req.on('timeout', () => {
+        try { if (tlsSocket) tlsSocket.destroy(); } catch (e) { /* abaikan */ }
+        req.destroy(new Error('timeout'));
+      });
+      req.on('error', (e) => {
+        try { if (tlsSocket) tlsSocket.destroy(); } catch (e2) { /* abaikan */ }
+        reject(e);
+      });
+      if (data) req.write(data);
+      req.end();
+    };
+    // Target https lewat proxy egress VM (curl bisa, https mentah tidak):
+    // bangun terowongan CONNECT dulu, lalu TLS di atasnya.
+    const proxy = url.protocol === 'https:' ? proxyUrlFor(url.hostname) : null;
+    if (proxy) {
+      connectTlsViaProxy(url.hostname, Number(url.port) || 443, proxy).then(
+        (tlsSocket) => startRequest({ createConnection: () => tlsSocket, servername: url.hostname }, tlsSocket),
+        reject,
+      );
+    } else {
+      startRequest();
+    }
   });
 }
 
@@ -126,6 +214,7 @@ function loadState() {
       throw new Error('bad_state_shape');
     }
     if (!data.hold || typeof data.hold !== 'object' || Array.isArray(data.hold)) data.hold = {};
+    return data;
   } catch (e) {
     // State rusak: selamatkan salinannya, mulai segar (penanda = sekarang).
     try {
@@ -154,6 +243,7 @@ function appendFollowup(entry, reason, extra) {
     from_username: entry.from_username ?? null,
     kind: entry.kind ?? null,
     text: entry.text ?? null,
+    ...(entry.media ? { media: entry.media } : {}),
     reason,
     ...(extra || {}),
   };

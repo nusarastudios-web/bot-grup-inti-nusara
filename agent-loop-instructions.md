@@ -10,7 +10,8 @@ Tidak ada nilai rahasia di sini — hanya nama file dan nama env.
 - Pertanyaan substantif di-defer worker ke file follow-up VM-lokal:
   `~/workspace/nusara-studio/bot-grup-inti/worker-needs-followup.jsonl`
   (satu baris JSON per pesan: message_id, chat_id, from_id,
-  from_username, kind, text, reason, holding_sent bila ada).
+  from_username, kind, text, reason, holding_sent bila ada, media
+  `{ type, file_id }` bila pesan bergambar).
 - Hook realtime (poll 10 detik) membangunkan agen ini begitu ada entri
   follow-up yang belum diproses. Agen inilah "otak Bowo penuh": menyusun
   jawaban dengan konteks dan ingatan Bowo, lalu mengirimnya lewat
@@ -25,12 +26,28 @@ Tidak ada nilai rahasia di sini — hanya nama file dan nama env.
 2. REALTIME: deteksi jalan terus (worker 10 detik + hook 10 detik);
    jawaban penuh butuh waktu mikir agen (puluhan detik) — itu wajar,
    dan pesan holding sudah menenangkan penyebut kedua.
-3. Bisa MENGIRIM FILE: itu jalur worker instan (katalog/URL), bukan
-   agent loop. Agent loop hanya mengirim TEKS.
+3. Bisa MENGIRIM FILE: jalur worker instan (katalog/URL) DAN agent loop
+   lewat send-bridge-reply.js dengan media (katalog untuk balasan siapa
+   pun; URL hanya sebagai balasan pesan Pak — server menolak URL untuk
+   pesan anggota). File selalu sebagai balasan pesan antrean nyata,
+   tidak pernah kiriman lepas.
 4. Bahasa Indonesia, singkat, santai, sebagai Bowo (GM Nusara Studio).
    Jangan mengarang harga, janji, data internal, atau fakta yang tidak
    diketahui. Bila tidak tahu, jawab jujur + arahkan ke Pak/Bowo.
    Jangan pernah menulis token, secret, atau data internal grup lain.
+
+## Pesan bergambar (upgrade 2026-11-03)
+
+- Bila entri follow-up punya `media: { type, file_id }` (foto/dokumen
+  dengan caption "Bowo"), unduh dulu gambarnya SEBELUM menjawab:
+  `S=$(grep '^BRIDGE_SECRET=' ~/.config/bowo-bridge/bridge.env | cut -d= -f2-); curl -sS -H "x-bridge-secret: $S" "https://bot-grup-inti-nusara.onrender.com/bridge/media?file_id=<file_id>" -o /tmp/bowo-media-<message_id>.bin`
+  (JANGAN pernah menampilkan isi bridge.env; pakai variabel seperti di
+  atas. Endpoint menolak file_id yang bukan milik entri antrean.)
+- Pakai file itu sebagai bahan jawaban (mis. flayer dari gambar).
+  Bila unduhan gagal, jawab jujur bahwa gambarnya tidak bisa diambil,
+  jangan mengarang isi gambar.
+- Hasil berupa file dikirim lewat send-bridge-reply.js dengan media
+  (katalog, atau URL sebagai balasan pesan Pak) — bukan teks saja.
 
 ## Langkah tiap putaran agen
 
@@ -66,7 +83,9 @@ Tidak ada nilai rahasia di sini — hanya nama file dan nama env.
    sapaan generik, kecuali entrinya memang sapaan yang lolos defer.
 4. Untuk tiap target, tulis file jawaban sementara di /tmp:
    `/tmp/bowo-bridge-answer-<message_id>.json` berisi persis:
-   `{"reply_to_message_id":<id>,"chat_id":<chat_id>,"text":"<jawaban>"}`
+   `{"reply_to_message_id":<id>,"chat_id":<chat_id>,"text":"<jawaban>"}` —
+   atau untuk file: ganti `"text"` dengan `"media":{"catalog":"<nama>"}`,
+   atau `"media":{"url":"<https://...>","type":"photo"|"video"|"document"}`.
    Lalu jalankan (tanpa pernah menampilkan file bridge.env):
    `node ~/workspace/nusara-studio/bot-grup-inti/send-bridge-reply.js --answer <file>`
    Skrip itu membaca BRIDGE_SECRET sendiri dari env atau dari
