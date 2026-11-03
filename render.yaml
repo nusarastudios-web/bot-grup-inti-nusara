@@ -20,3 +20,8 @@ services:
         sync: false
       - key: GROUP_CHAT_ID
         sync: false
+      # BARU tahap jembatan (nama saja; nilai diisi di dashboard Render):
+      - key: BRIDGE_SECRET
+        sync: false
+      - key: OWNER_USER_ID
+        sync: false

@@ -1,178 +1,277 @@
-# Bot Telegram Grup Inti Nusara Studio — Kerangka Server
+# Bot Telegram Grup Inti Nusara Studio — Jembatan Jawaban (Opsi B: worker Bowo)
 
-Status: **KODE SIAP DEPLOY KE RENDER FREE, TAPI BELUM DI-DEPLOY DAN BELUM HIDUP DI GRUP NYATA.**
-Kerangka server + file deploy (render.yaml, Procfile, .gitignore) sudah ada di folder ini. Belum ada deploy ke Render, belum ada webhook yang di-set, belum ada token yang ditulis di mana pun.
-Bot Telegram `@bowo_agent_bot` sudah dibuat Pak di BotFather dan privacy mode
-sudah DISABLED, grup inti sudah dibuat dan bot + 2 orang inti sudah masuk grup.
-Server ini belum membalas apa pun ke grup: pesan yang memanggil "Bowo" hanya
-ditulis ke antrean file, untuk dijawab Bowo/Muse pada tahap berikutnya.
+Status: **TAHAP IMPLEMENTASI SELESAI, SIAP UPLOAD + SIAP UJI.**
+**BELUM di-upload, BELUM di-deploy, BELUM mengirim apa pun ke grup nyata.**
+Dokumen ini menggambarkan keadaan per 3 November 2026. Unggahan ke GitHub
+dilakukan Bowo lewat browser (memakai sesi GitHub Pak) — BUKAN git push
+langsung, BUKAN manual oleh Pak. Jangan menjalankan worker atau menguji live
+sebelum laporan implementasi ditinjau dan Pak memberi lampu hijau.
 
-## Cara kerja (tahap kerangka)
+## Keadaan yang sudah terbukti (3 Nov 2026)
 
-1. Telegram mengirim update webhook POST ke `/webhook/<WEBHOOK_SECRET>`.
-2. Server memeriksa secret (path + header `X-Telegram-Bot-Api-Secret-Token`
-   bila header itu dikirim) dan whitelist `GROUP_CHAT_ID`.
-3. Bila pesan bukan dari grup whitelist, atau tidak mengandung kata "Bowo"
-   (case-insensitive, batas kata), server **DIAM total** — tidak antre, tidak balas.
-4. Bila mengandung "Bowo", server menulis satu baris JSON ke
-   `queue/incoming.jsonl` dan membalas 200 cepat ke Telegram.
-5. **Tidak ada** panggilan ke Telegram Bot API dari server ini, jadi tidak
-   ada pesan yang terkirim ke grup nyata pada tahap ini.
+- Bot **@bowo_nusara_bot** sudah di grup inti, privacy **DISABLED**
+  (menerima semua pesan grup). Bot lama @bowo_agent_bot digantikan sesudah
+  Pak me-revoke token lama.
+- Service Render Free **bot-grup-inti-nusara** LIVE:
+  `https://bot-grup-inti-nusara.onrender.com` (+ `/health` untuk list ping Pak).
+  Repo: `nusarastudios-web/bot-grup-inti-nusara`.
+- Webhook **TERPASANG** (3 Nov ~10:07, `ok:true`).
+- Antrean **TERVERIFIKASI**: pesan "Bowo halo" masuk antrean 10:07:56 WIB
+  (~31 detik sesudah webhook dipasang); total 3 pesan tes masuk antrean
+  (10:07:56, 10:13:48, 10:40:48 WIB, termasuk "halo bowo" huruf kecil).
+  Nol pesan diabaikan. Tahap kerangka terbukti hidup end-to-end
+  (webhook → saringan "Bowo" → antrean).
 
-## Cara jalan lokal
+## Keputusan Pak (sudah diputuskan, jangan diubah)
 
-```bash
-cd ~/workspace/nusara-studio/bot-grup-inti
-WEBHOOK_SECRET=isi-rahasia-sendiri GROUP_CHAT_ID=-100xxxxxxxxxx node server.js
-# cek kesehatan:
-curl -s http://127.0.0.1:3000/health
-```
+1. Jawab **LANGSUNG** di grup tanpa konfirmasi per pesan.
+2. **REALTIME + CEPAT**: pekerja jalan terus, latensi hitungan detik.
+3. Bisa **MENGIRIM FILE**: foto (`sendPhoto`), video (`sendVideo`),
+   dokumen (`sendDocument`), batas 50 MB per file, diperiksa sebelum kirim.
+4. Pemicu kirim file **KEDUANYA**: permintaan anggota grup HANYA boleh
+   memicu file katalog; perintah Pak/Bowo boleh memicu katalog + URL.
+   Pembeda: `user_id` pengirim vs env `OWNER_USER_ID` (nama saja).
+5. Tunggakan: **HANYA pesan baru**. Entri antrean sebelum waktu aktivasi
+   jembatan = riwayat, tidak dijawab. Pengecualian hanya bila Pak mengirim
+   ulang pesannya.
+6. Katalog file: struktur dibangun, **isi awal KOSONG** (Pak mengisi
+   nama + file/URL belakangan). Permintaan di luar katalog dijawab jujur
+   "tidak ada" (tidak mengarang).
+7. Otak: **Opsi B (worker Bowo)** — menggantikan rekomendasi rancangan
+   (Opsi A, API LLM). Interval: **REALTIME** (pekerja jalan terus).
 
-Tanpa env, server tetap jalan (port 3000) dalam mode tes lokal, tapi
-**tidak mengantrekan apa pun** selama `GROUP_CHAT_ID` kosong — itu sengaja,
-supaya kerangka yang belum dikonfigurasi tidak menangkap pesan sembarangan.
+## Cara kerja (Opsi B)
 
-## Tes lokal
+1. Telegram mengantar update webhook ke server (Render) seketika.
+2. Server membalas 200 CEPAT, lalu menyaring: whitelist grup, kata "Bowo"
+   (case-insensitive, batas kata), abaikan pesan bot (anti-loop).
+3. Pesan yang lolos ditulis ke `queue/incoming.jsonl` (di disk Render).
+   Sejak jembatan aktif, antrean ini tetap menjadi daftar kerja worker
+   (berbeda dengan Opsi A yang tidak memakai antrean) — karena worker
+   membacanya lewat endpoint internal.
+4. Worker (di VM Bowo, proses jalan terus) mengecek
+   `GET /bridge/pending` tiap 15 detik (default), menyusun balasan sebagai
+   Bowo, lalu mengirim lewat `POST /bridge/send`.
+5. Server mengirim balasan ke grup **HANYA sebagai balasan (reply_to) atas
+   pesan antrean yang nyata, HANYA ke grup whitelist** — bot tidak pernah
+   memulai percakapan sendiri. Kiriman yang sudah terkirim dicatat di
+   `queue/sent.jsonl` (idempotensi: tidak ada balasan ganda).
+6. Penanda worker (file state di VM) menentukan apa yang "baru": entri
+   sebelum waktu aktivasi worker tidak pernah dijawab (aturan tunggakan).
 
-```bash
-cd ~/workspace/nusara-studio/bot-grup-inti
-node test-local.js
-```
+## Wiring penuh — final (3 Nov 2026, perintah Pak "bangun wiring jawaban
+penuh, biar final" + "tetap realtime" + aturan holding spam)
 
-Tes memakai update Telegram **tiruan** ke server lokal (port 3456) dan
-memeriksa 3 kasus wajib + 1 bonus:
+Skrip worker **BUKAN Bowo yang berpikir**. Yang dikerjakan skrip sampai
+tuntas dan INSTAN: sapaan, permintaan file katalog, perintah URL
+Pak/Bowo. Pertanyaan substantif di-DEFER (default
+`BRIDGE_DEFER_SUBSTANTIVE=1`) ke file follow-up, lalu dijawab penuh
+oleh agent loop Bowo lewat hook realtime (poll 10 detik) +
+`send-bridge-reply.js` + `/bridge/send`. Mode fallback lama
+("Maaf, saya belum bisa menjawab itu sekarang — Bowo akan menjawab
+menyusul") hanya hidup bila `BRIDGE_DEFER_SUBSTANTIVE=0` (untuk tes).
+Skrip ini **TIDAK PERNAH mengarang jawaban**. Prinsip: lebih baik defer
++ holding jujur daripada jawaban karangan.
 
-- (a) grup whitelist + "Bowo halo" → masuk antrean
-- (b) grup whitelist tanpa "Bowo" → tidak masuk antrean, diam
-- (c) grup lain + "Bowo halo" → diabaikan
-- (d) bonus: "bowo" huruf kecil di grup whitelist → masuk antrean
+Realtime = deteksi jalan terus, bukan batch per menit: worker poll
+10 detik, hook poll 10 detik, jawaban penuh menyusul dalam puluhan
+detik (waktu mikir agen). Aturan holding spam (Pak 3 Nov): penyebutan
+substantif ke-2 dari pengirim yang sama selagi pertanyaan pertamanya
+masih tertunda OTOMATIS dibalas "sabar sebentar ya.. bowo lagi mikir"
+(teks persis); sesudah itu tidak ada holding ulang sampai agent loop
+menjawab pertanyaan tertunda pengirim itu. Detail: lihat
+`agent-loop-instructions.md` + hook `~/hooks/scripts/bowo-bridge-agent-loop.sh`.
 
-Tes membersihkan `queue/incoming.jsonl` dulu, jadi hitungannya murni dari tes.
+## File di folder ini
 
-## Env yang dibutuhkan
+| File | Peran |
+|---|---|
+| `server.js` | Server Render: webhook + antrean + endpoint `/bridge/*` + pengirim Telegram. Tanpa dependensi (Node bawaan saja). |
+| `worker.js` | Worker VM: poll antrean, susun balasan, kirim lewat server. Dijalankan systemd, BUKAN oleh Render. |
+| `catalog.json` | Katalog file: `{"files": {}}` (KOSONG — Pak mengisi belakangan). |
+| `catalog/` | Folder file katalog (saat ini hanya `.gitkeep`). File yang ditambahkan di sini ikut ter-deploy dan bisa dikirim bot. |
+| `systemd/bowo-bridge-worker.service` | Unit systemd worker (berversi di repo; dipasang saat setup, bukan sekarang). |
+| `test-local.js` | Tes kerangka (4 kasus, dari tahap kerangka — tetap lolos). |
+| `test-bridge-local.js` | Tes jembatan (36 kasus: unit + server + worker; salinan /tmp, Telegram fake, tanpa kiriman nyata). Worker di tes ini memakai mode fallback lama (`BRIDGE_DEFER_SUBSTANTIVE=0`). |
+| `send-bridge-reply.js` | Pengirim jawaban agent loop lewat `/bridge/send` (baca BRIDGE_SECRET sendiri, tanpa pernah mencetaknya). |
+| `agent-loop-instructions.md` | Instruksi agent loop hook realtime (jawab tertua per pengirim, supersede sisanya, fail-closed). |
+| `test-agent-loop.js` | Tes wiring penuh: defer worker + holding penyebutan ke-2 + pengirim agent loop + hook script (salinan /tmp). |
+| `render.yaml`, `Procfile`, `package.json` | Deploy Render (start: `node server.js`; worker TIDAK dijalankan Render). |
+| `rencana-jembatan-jawaban.md` | Rancangan (dokumen desain; rekomendasi Opsi A-nya digantikan keputusan Pak: Opsi B). |
+
+## Env yang dibutuhkan (NAMA saja — nilai TIDAK PERNAH di repo/chat)
 
 | Variabel | Wajib? | Keterangan |
 |---|---|---|
-| `PORT` | Tidak (default 3000) | Port yang didengarkan server. Render mengisi ini sendiri. |
-| `TELEGRAM_BOT_TOKEN` | Ya, untuk produksi | Token dari BotFather. **JANGAN tulis token nyata di file, di chat, atau di screenshot.** Di tahap kerangka boleh kosong (mode tes lokal). Server ini tidak memanggil Telegram API, tapi env ini dibaca untuk menandai mode. |
-| `WEBHOOK_SECRET` | Sangat disarankan | String rahasia acak. Dipakai sebagai segmen path webhook dan sebagai `secret_token` saat set webhook. |
-| `GROUP_CHAT_ID` | Ya, untuk produksi | ID numerik grup Telegram inti (mis. `-100xxxxxxxxxx`, negatif untuk grup). Hanya chat_id ini yang diproses. |
+| `PORT` | Tidak (default 3000) | Render mengisi sendiri. |
+| `TELEGRAM_BOT_TOKEN` | Ya, produksi | Token BotFather. Hanya pemegang token yang menempelkannya di dashboard. |
+| `WEBHOOK_SECRET` | Sangat disarankan | Segmen path webhook + `secret_token` Telegram. |
+| `GROUP_CHAT_ID` | Ya, produksi | ID numerik grup inti (negatif untuk grup). Hanya chat_id ini yang diproses/dikirim. |
+| `BRIDGE_SECRET` | **BARU, wajib jembatan** | Secret bersama server-worker untuk `/bridge/*`. Nilainya hanya Pak yang mengetikkan di dashboard Render; nilai yang SAMA harus ada di EnvironmentFile worker saat setup (di luar repo, mode 0600). Tanpa ini, `/bridge/*` menolak (503) dan worker berhenti gagal tertutup (exit 3) — tidak ada kiriman tanpa auth. |
+| `OWNER_USER_ID` | **BARU, opsional** | User_id Telegram Pak/Bowo. Bila diisi, pesan dari user_id itu = perintah (katalog + URL). Bila kosong, semua = permintaan anggota (katalog saja) — default aman. Nilainya hanya Pak yang mengetikkan di dashboard Render. |
+| `BRIDGE_DRY_RUN` | Hanya tes lokal | `"1"` = `/bridge/send` hanya mencatat tanpa memanggil Telegram dan tanpa merekam kiriman. **JANGAN PERNAH di-set di Render.** |
+| `BRIDGE_FAKE_TELEGRAM` | Hanya tes lokal | `"1"` = panggilan Telegram disimulasi sukses tanpa jaringan, tapi validasi, rate limit, pencatatan, dan dedup tetap berjalan. **JANGAN PERNAH di-set di Render.** |
 
-Contoh file env (JANGAN diisi nilai nyata di repo):
+Contoh file env (JANGAN diisi nilai nyata di repo — lihat `.env.example`):
 
 ```bash
-# .env.example — salin jadi .env di server, isi di sana, jangan commit
 PORT=3000
 TELEGRAM_BOT_TOKEN=
 WEBHOOK_SECRET=
 GROUP_CHAT_ID=
+BRIDGE_SECRET=
+OWNER_USER_ID=
 ```
 
-## Cara set webhook nanti (SETELAH token aman + hosting diputuskan)
+## Worker + supervisi (systemd)
 
-Perintah ini **JANGAN dijalankan sekarang** (kerangka saja, tanpa token,
-tanpa deploy). Nanti, setelah server sudah hidup di URL publik, jalankan
-dari mesin yang memegang token — ganti `<TOKEN>`, `<SECRET>`, dan
-`<URL-PUBLIK-SERVER>` dengan nilai sebenarnya, tanpa menempelkannya di chat:
+Worker dijalankan sebagai **system service** (bukan proses latar biasa):
+
+- Unit: `systemd/bowo-bridge-worker.service` (Type=simple, User=root,
+  WorkingDirectory + ExecStart absolut ke folder ini,
+  `EnvironmentFile=-/home/hatch/.config/bowo-bridge/bridge.env` (opsional,
+  tanda `-`: unit tetap bisa dimuat tanpa file itu, tapi worker exit 3
+  bila `BRIDGE_SECRET` tidak ada — gagal tertutup, bukan jalan tanpa auth),
+  `Environment=BRIDGE_POLL_MS=10000`).
+- Restart: `Restart=on-failure`, `RestartSec=30`, dibatasi maks 5 restart
+  per 10 menit (`StartLimitBurst=5`) supaya tidak berputar tanpa henti bila
+  konfigurasi salah.
+- Startup: `WantedBy=multi-user.target` (enabled = hidup otomatis tiap
+  boot VM). Bila VM **DIGANTI**, ulangi di VM baru: salin unit ke
+  `/etc/systemd/system/`, buat EnvironmentFile (mode 0600, di luar repo),
+  `daemon-reload`, `enable`, `start` — itulah pemulihan startup (file unit
+  berversi di repo, jadi tidak perlu ditulis ulang).
+- Log worker: journal systemd (`journalctl -u bowo-bridge-worker -f`),
+  HANYA metadata (message_id, kind, hasil) — tidak ada isi pesan/URL.
+- File tindak lanjut: `worker-needs-followup.jsonl` (VM-lokal, gitignored,
+  tidak di-upload) — berisi pesan yang perlu dijawab Bowo menyusul
+  (pertanyaan substantif + kiriman gagal). Seperti antrean, file ini memang
+  berisi teks pesan agar Bowo bisa menindaklanjuti — jangan dipublikasikan.
+
+**PENTING: worker BELUM dipasang/dijalankan.** Pemasangan + `enable` +
+`start` dilakukan induk/Bowo SETELAH lampu hijau Pak (bersamaan dengan
+deploy server). Verifikasi unit sejauh ini: `systemd-analyze verify`
+(lolos) + tes worker lokal (lolos) — bukan service yang sedang jalan.
+
+## Katalog file (isi awal kosong)
+
+Format `catalog.json` (kunci dicocokkan case-insensitive):
+
+```json
+{
+  "files": {
+    "pricelist": { "type": "document", "file": "pricelist.pdf" },
+    "contoh-video": { "type": "video", "url": "https://contoh.com/video.mp4" }
+  }
+}
+```
+
+- `type`: `photo` | `video` | `document`.
+- `file`: nama file di dalam folder `catalog/` (path traversal ditolak
+  server; ukuran diperiksa ≤ 50 MB sebelum kirim).
+- `url`: URL publik http(s) (hanya dipakai server untuk kirim; server
+  tidak me-log URL).
+- `caption`: opsional (default: `File: <nama>`).
+- Menambah/mengganti file = upload lewat browser GitHub (Bowo, sesi Pak)
+  + deploy ulang Render (server memuat katalog segar tiap pemakaian).
+
+## Pengaman (yang diimplementasikan)
+
+- **Anti-loop**: pesan bot diabaikan (kerangka) + balasan bot tidak memicu
+  balasan lagi (karena pesan bot diabaikan) + dedup `update_id` (webhook)
+  + idempotensi kiriman (`sent.jsonl`: satu balasan per pesan antrean).
+- **Rate limit**: teks maks 1 per 10 detik per orang; file maks 1 per menit
+  per orang; jarak kirim global ~1,1 detik (batas Telegram). Pelanggaran
+  = bot **DIAM** (tidak ada spam "sabar ya"); worker TIDAK menunggu di
+  tempat saat kena 429 — ia melewati pesan itu dan lanjut (supaya antrean
+  tetap realtime untuk yang lain; pengirim bisa mengirim ulang).
+- **429 Telegram**: dikembalikan ke worker sebagai `telegram_rate_limited`
+  + `retry_after`; worker melewatinya (tidak memaksa).
+- **Pesan panjang**: teks > 4096 karakter dibagi per paragraf (potongan
+  keras per code point supaya emoji tidak terbelah); caption media
+  dipotong 1024 karakter.
+- **Whitelist kirim**: `/bridge/send` HANYA ke `GROUP_CHAT_ID`, HANYA
+  sebagai balasan atas pesan antrean nyata. Media URL HANYA untuk
+  perintah Pak/Bowo (kind=order); anggota yang mengirim URL mendapat
+  jawaban "tidak ada" (dan server menolaknya 403 sebagai jaring kedua).
+- **Restart/tidur Render**: webhook selamat (tersimpan di pihak Telegram);
+  antrean/kiriman di disk Render bisa hilang saat restart — DITERIMA
+  karena penanda worker (di VM) yang menentukan apa yang sudah dijawab,
+  dan kiriman yang sudah dibalas 200 tidak dikirim ulang Telegram.
+  Tidur: pesan tertunda sampai server bangun (Telegram menahan/mengulang
+  sementara); ping `/health` berkala mengurangi tidur.
+- **Privasi**: log server + worker = metadata saja; token/secret/user_id
+  tidak pernah di-log; file antrean + follow-up = data grup inti, jangan
+  dipublikasikan.
+
+## Cara jalan lokal (tes saja, tanpa Telegram nyata)
 
 ```bash
-curl -s "https://api.telegram.org/bot<TOKEN>/setWebhook" \
-  -d "url=<URL-PUBLIK-SERVER>/webhook/<SECRET>" \
-  -d "secret_token=<SECRET>"
+cd ~/workspace/nusara-studio/bot-grup-inti
+node test-local.js          # tes kerangka (4 kasus)
+node test-bridge-local.js   # tes jembatan (36 kasus: unit + server + worker)
 ```
 
-Verifikasi: `getWebhookInfo` harus menunjukkan URL dan `pending_update_count`
-yang wajar, dan kirim "Bowo halo" di grup inti harus menambah satu baris di
-`queue/incoming.jsonl` tanpa balasan otomatis apa pun (sampai tahap jembatan
-jawaban dibangun).
+Kedua tes memakai nilai dummy + update tiruan + (jembatan) Telegram fake;
+tidak ada pesan ke grup nyata, tidak ada perubahan service Render. Tes
+jembatan menyalin kode ke /tmp (repo tidak tersentuh) dan menguji: auth
+bridge (401/403), kind request/order, whitelist kirim, reply_to tak dikenal,
+duplikat, rate limit, potongan teks, katalog kosong, URL anggota ditolak,
+URL pemilik lolos, field `/health`, cutoff tunggakan (pesan pra-start
+tidak dijawab), sapaan, file tak dikenal, fallback + follow-up, log tanpa
+isi pesan, dan tidak ada kirim ulang.
 
-## Deploy ke Render Free
+## Langkah upload + deploy + uji (SETELAH lampu hijau Pak)
 
-Langkah ini **BELUM dilakukan** — daftar di bawah ini adalah langkah yang masih butuh tangan Pak/Bowo di browser Render. Jangan jalankan set webhook sebelum service ini hidup dan env-nya terisi.
+Urutan ini dilakukan Bowo (upload lewat browser, sesi GitHub Pak) + Pak
+(env). **Jangan mulai sebelum laporan implementasi ditinjau.**
 
-1. **Push kode ke GitHub.** Folder `bot-grup-inti` ini harus jadi root repo, atau bila repo-nya monorepo, catat folder ini untuk dipakai sebagai Root Directory di langkah 3. Pastikan `.env` dan `queue/*.jsonl` tidak ikut ter-push (sudah dikecualikan `.gitignore` di folder ini).
-2. **Render Dashboard → New → Web Service → hubungkan repo GitHub** yang berisi kode ini.
-3. **Pengaturan service:**
-   - Name: `bot-grup-inti-nusara` (atau nama lain yang belum dipakai di akun Render itu)
-   - Region: pilih yang terdekat (layanan Nusara lain memakai Singapore)
-   - Branch: `main`
-   - Root Directory: kosongkan bila folder ini adalah root repo; isi `bot-grup-inti` (atau path folder ini di repo) bila repo-nya monorepo
-   - Build Command: `npm install`
-   - Start Command: `node server.js`
-   - Instance Type: **Free**
-   - Health Check Path: `/health` (sudah tertulis di `render.yaml`)
-   - Bila Render menawarkan memakai `render.yaml` (Blueprint), nilai di atas sudah sama dengan isi file itu — env tetap harus diisi manual di langkah 4, karena `render.yaml` memakai `sync: false` dan tidak membawa nilai rahasia.
-4. **Isi Environment Variables di dashboard Render (Environment), BUKAN di repo, BUKAN di chat:**
+1. **Env baru di dashboard Render** (Pak mengetikkan nilainya sendiri,
+   Bowo hanya memverifikasi NAMANYA ada):
+   - `BRIDGE_SECRET` (nilai baru; nilai yang SAMA dipakai EnvironmentFile worker).
+   - `OWNER_USER_ID` (user_id Telegram Pak; bila dikosongkan, semua pesan
+     = permintaan anggota — perintah URL Pak tidak dikenali).
+   - Pastikan `BRIDGE_DRY_RUN` dan `BRIDGE_FAKE_TELEGRAM` TIDAK di-set.
+2. **Upload lewat browser GitHub** (Bowo, sesi Pak): file yang diubah/dibuat
+   (lihat laporan implementasi) ke repo `nusarastudios-web/bot-grup-inti-nusara`.
+3. **Render men-deploy otomatis**; tunggu status Live.
+4. **Verifikasi `/health`**: `bridge_configured: true`,
+   `owner_configured: true` (bila OWNER_USER_ID diisi),
+   `catalog_count: 0` (katalog masih kosong), `test_mode: false`.
+   Bila `test_mode: true`, BERHENTI — ada env tes yang tersisa.
+5. **Verifikasi webhook masih terpasang** (uji "Bowo halo" adalah bukti
+   langsung; bila ragu, Pak memeriksa info webhook dengan cara yang sama
+   seperti saat set webhook — token tidak lewat Bowo).
+6. **Pasang + jalankan worker** (induk/Bowo, di VM): salin unit systemd,
+   buat EnvironmentFile (mode 0600, di luar repo), `daemon-reload`,
+   `enable`, `start`, periksa `status` + log journal.
+7. **Uji live berurutan** (semua harus lolos sebelum dinyatakan selesai):
+   1. "Bowo halo" → bot membalas sapaan langsung (target hitungan detik).
+   2. Pesan tanpa kata "Bowo" → bot diam total.
+   3. Anti-loop: tepat satu balasan, tidak beruntun.
+   4. Permintaan file anggota: "Bowo kirim <nama>" di luar katalog →
+      jawaban jujur "tidak ada". (File katalog terkirim baru bisa diuji
+      sesudah Pak mengisi satu entri katalog.)
+   5. Perintah Pak: "Bowo kirim <URL>" → bot mengirim file-nya.
+   6. File tak dikenal (ulang, sesudah katalog terisi) → tetap "tidak ada".
+   7. Sesudah deploy ulang: "Bowo halo" lagi → tetap membalas (webhook
+      selamat dari deploy).
+   8. Spam: kirim "Bowo" bertubi-tubi → bot membatasi (tidak membanjiri).
+   - Bila ada uji gagal: hentikan, perbaiki, ulangi dari uji 1.
+   - Bila bot spam/loop di tengah uji: matikan darurat dengan mencabut
+     webhook (Pak, dengan cara yang sama seperti set webhook — token tidak
+     lewat Bowo) atau mengembalikan file repo ke versi kerangka; kerangka
+     antre-saja adalah fallback yang aman.
 
-   | Variabel | Isi |
-   |---|---|
-   | `TELEGRAM_BOT_TOKEN` | Token dari BotFather (hanya pemegang token yang menempelkannya di dashboard) |
-   | `WEBHOOK_SECRET` | String rahasia acak buatan sendiri (dipakai juga sebagai segmen path webhook) |
-   | `GROUP_CHAT_ID` | ID numerik grup Telegram inti (negatif untuk grup, mis. `-100xxxxxxxxxx`) |
+## Keterbatasan Render Free (jujur, sebelum go-live)
 
-   `PORT` **JANGAN** diisi manual: Render mengisinya otomatis, dan `server.js` sudah membaca `PORT` dari env serta mengikat `0.0.0.0`.
-5. **Deploy, lalu verifikasi:** buka `<url-render>/health` di browser — harus kembali `{"ok":true,...}` dengan cepat. Bila masih 404 / tidak merespons, jangan lanjut ke webhook; periksa log deploy Render dulu.
-6. **URL untuk list ping Pak (PENTING, tanpa rahasia):**
-
-   ```
-   <url-render>/health
-   ```
-
-   Contoh bentuknya (ganti `<url-render>` dengan URL service Render yang sebenarnya, tanpa nilai lain):
-
-   ```
-   https://bot-grup-inti-nusara.onrender.com/health
-   ```
-
-   Masukkan **persis URL `/health` itu** ke list ping Pak, BUKAN URL root `/` (root mengembalikan 404) dan BUKAN URL webhook (webhook mengandung secret). Endpoint `/health` publik, cepat, tanpa token, tanpa secret, tanpa chat id — hanya mengembalikan `ok` + boolean konfigurasi, tanpa nilai rahasia apa pun — jadi aman untuk di-ping berkala supaya Render Free tidak tidur.
-7. **Baru sesudah service hidup + env terisi + `/health` lolos, set webhook** dengan perintah di bagian "Cara set webhook nanti" di atas, memakai URL webhook:
-
-   ```
-   <url-render>/webhook/<SECRET>
-   ```
-
-   `<SECRET>` di sini adalah nilai `WEBHOOK_SECRET` yang sama dengan yang diisi di dashboard — jangan ditempel di chat, jangan dimasukkan ke list ping.
-
-**Catatan keterbatasan Render Free (jujur, sebelum go-live):** disk Render Free tidak persisten — antrean file `queue/incoming.jsonl` bisa hilang saat service restart/tidur, dan deploy ulang juga mengosongkannya. Untuk tahap kerangka ini diterima (antrean hanya penampung sementara sebelum jembatan jawaban dibangun); sebelum bot dipakai penuh di grup inti, jembatan jawaban harus membaca antrean dengan cepat atau antrean dipindah ke penyimpanan persisten, supaya pesan yang memanggil "Bowo" tidak hilang saat restart.
-
-## Pilihan hosting yang perlu diputuskan Pak
-
-1. **Server selalu hidup (berbayar / VPS / layanan always-on)**
-   - Kelebihan: pesan webhook sampai dalam hitungan detik, jawaban cepat,
-     sesuai janji realtime untuk grup inti.
-   - Kekurangan: ada biaya bulanan (besarnya tergantung penyedia), perlu
-     perawatan (restart, log, keamanan).
-2. **Hosting gratis yang tidur (mis. Render Free)**
-   - Kelebihan: tanpa biaya.
-   - Kekurangan: server tidur saat sepi; pesan pertama sesudah tidur bisa
-     telat 30–60 detik (atau lebih) sampai server bangun, webhook Telegram
-     bisa menumpuk / mengulang. Untuk grup inti yang mengharapkan respons
-     cepat saat dipanggil, ini adalah kelemahan nyata.
-3. **Server lokal / VM yang sudah jalan (jika tersedia dan punya URL publik)**
-   - Kelebihan: tanpa biaya baru, Bowo sudah punya pola watchdog untuk
-     server lokal + relay.
-   - Kekurangan: ketergantungan pada mesin itu (mati = bot mati), dan URL
-     publiknya harus stabil + HTTPS (syarat webhook Telegram).
-
-Rekomendasi kerangka: putuskan hosting **sebelum** set webhook, karena URL
-webhook terikat ke hosting yang dipilih. Jangan set webhook ke URL sementara
-lalu pindah-pindah — setiap pindah harus set webhook ulang.
-
-## Yang masih kurang sebelum bot bisa menjawab di grup nyata
-
-1. **Token aman**: token BotFather dimasukkan lewat formulir/env aman di
-   server (bukan lewat chat, bukan di file repo).
-2. **Hosting diputuskan + server di-deploy** (lihat pilihan di atas).
-3. **Webhook di-set** ke URL publik server (perintah di atas).
-4. **Group chat ID nyata** dimasukkan ke `GROUP_CHAT_ID` (didapat saat bot
-   menerima pesan pertama di grup, atau dari info grup — bukan ditebak).
-5. **Jembatan jawaban Bowo**: pekerja/penjadwal yang membaca
-   `queue/incoming.jsonl`, meminta jawaban ke Bowo/Muse, lalu mengirim
-   jawaban itu kembali ke grup lewat Telegram Bot API. Bagian ini BELUM ADA
-   di kerangka ini — inilah yang membuat bot saat ini hanya mengantre, bukan
-   menjawab. Aturan jawaban di grup (jawab langsung saat dipanggil vs
-   konfirmasi ke Pak dulu per pesan) juga perlu diputuskan Pak sebelum
-   jembatan ini dibangun, karena berpengaruh ke kecepatan respons.
-6. **Uji di grup nyata**: "Bowo halo" → antre + jawab; obrolan tanpa "Bowo"
-   → diam; pesan dari grup lain → diabaikan. Uji ini baru sah sesudah
-   poin 1–5 selesai.
+- Disk tidak persisten: antrean + catatan kiriman bisa hilang saat
+  restart/tidur/deploy ulang. Diterima karena penanda worker (VM) +
+  idempotensi kiriman meminimalkan balasan ganda; pesan yang belum sempat
+  dijawab saat server mati lama bisa hilang tanpa balasan (pengguna bisa
+  mengulang panggilan "Bowo").
+- Tidur: pesan pertama sesudah tidur telat sampai server bangun
+  (puluhan detik). Ping `/health` berkala mengurangi tidur; monitor
+  otomatis (bila disetujui Pak) lebih andal daripada ping manual.
+- Satu instance: rate limit in-memory (bukan lintas instance) — cukup
+  untuk Free (satu instance), dan batas Telegram sendiri menjadi backstop.

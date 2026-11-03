@@ -6,3 +6,13 @@ node_modules/
 queue/*.jsonl
 !queue/.gitkeep
 *.log
+# State worker (VM-lokal, bukan repo): penanda, tindak lanjut, cadangan rusak.
+worker-state.json
+worker-state.json.tmp
+worker-state.json.corrupt
+worker-needs-followup.jsonl
+# Log pemrosesan agent loop (VM-lokal, bukan repo).
+agent-loop-processed.jsonl
+*.corrupt
+# File kredensial worker (dibuat saat setup di luar repo, mode 0600).
+bridge.env
