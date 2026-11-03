@@ -6,7 +6,7 @@
 //
 // PERILAKU YANG DIPERTAHANKAN dari kerangka (sudah terbukti 3 Nov 2026):
 //   - /health publik (ok + boolean konfigurasi, tanpa nilai rahasia).
-//   - Whitelist GROUP_CHAT_ID; chat pribadi pemilik diizinkan; diam total tanpa kata "Bowo" (kecuali DM pemilik & agen Prabu).
+//   - Whitelist GROUP_CHAT_ID; chat pribadi pemilik diizinkan; diam total tanpa kata "Bowo" atau tag @bowo_nusara_bot (kecuali DM pemilik & agen Prabu).
 //   - Pemicu kata "Bowo" saja, case-insensitive, batas kata.
 //   - Pesan dari akun bot diabaikan (anti-loop).
 //   - Balas 200 CEPAT ke Telegram, baru proses.
@@ -73,6 +73,9 @@ const CATALOG_DIR = path.join(__dirname, 'catalog');
 const CATALOG_FILE = path.join(__dirname, 'catalog.json');
 
 const TRIGGER_RE = /\bBowo\b/i;
+// Tag ke bot sendiri (@bowo_nusara_bot) juga panggilan: tag tidak cocok
+// dengan \bBowo\b karena '_' sesudah 'bowo' adalah word character.
+const MENTION_RE = /@bowo_nusara_bot\b/i;
 const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50 MB, batas Telegram untuk bot.
 const TEXT_LIMIT = 4096; // Batas karakter pesan teks Telegram.
 const CAPTION_LIMIT = 1024; // Batas karakter caption media Telegram.
@@ -447,14 +450,15 @@ function handleUpdate(update) {
     return { queued: false, reason: 'not_a_group' };
   }
 
-  // DIAM total bila tidak ada kata "Bowo" — KECUALI untuk agen Prabu.
+  // DIAM total bila tidak ada kata "Bowo" dan tidak ada tag bot —
+  // KECUALI untuk agen Prabu.
   // PERINTAH PAK 3 Nov 14:35: pesan agen Prabu (@AgentAIprabubot) DIANTREKAN
   // walau tanpa kata "Bowo", supaya debat Bowo-Prabu bisa jalan (jawaban
   // debat Prabu pada umumnya tidak menyebut "Bowo"). Pengecualian ini
   // SEMPIT: hanya username persis 'agentai prabubot', hanya di grup
   // whitelist; semua pengirim lain tetap wajib kata "Bowo".
-  if (!isOwnerPrivate && !TRIGGER_RE.test(text) && fromUsername !== 'agentai prabubot') {
-    log({ event: 'ignored', reason: 'no_trigger', chat_id: chatId, message_id: message.message_id });
+  if (!isOwnerPrivate && !TRIGGER_RE.test(text) && !MENTION_RE.test(text) && fromUsername !== 'agentai prabubot') {
+    log({ event: 'ignored', reason: 'no_trigger', chat_id: chatId, message_id: message.message_id, from_username: fromUsername || undefined, text_preview: [...String(text)].slice(0, 80).join('') });
     return { queued: false, reason: 'no_trigger' };
   }
 
