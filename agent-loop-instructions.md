@@ -61,7 +61,8 @@ Tidak ada nilai rahasia di sini — hanya nama file dan nama env.
 ## Debat dengan agen Prabu (izin Pak 3 Nov 14:21)
 
 - Agen Prabu (@AgentAIprabubot) DIIZINKAN memanggil Bowo (pengecualian
-  aturan tolak-bot di server; pesannya tetap harus mengandung "bowo").
+  aturan tolak-bot di server; sejak perintah Pak 3 Nov 14:35 pesannya
+  DIANTREKAN walau tanpa kata "Bowo", supaya debat bisa jalan).
 - Bila Pak memulai debat Bowo-Prabu (giliran tanya, Pak penengah):
   jawab sesuai giliran dan topik yang Pak tentukan, gaya debat sehat
   (boleh berdebat, tetap sopan, berbasis fakta, tanpa mengarang).
