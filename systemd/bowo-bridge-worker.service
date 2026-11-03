@@ -1,0 +1,44 @@
+# Systemd unit untuk worker jembatan jawaban bot Telegram grup inti.
+# CARA PASANG (dilakukan induk/Bowo SETELAH lampu hijau Pak — BUKAN sekarang):
+#   1. Salin file ini ke /etc/systemd/system/bowo-bridge-worker.service
+#   2. Buat file EnvironmentFile di bawah (di LUAR repo, mode 0600, berisi
+#      SATU baris: BRIDGE_SECRET=<nilai yang diketik Pak di Render>.
+#      File ini TIDAK PERNAH di-commit, TIDAK PERNAH ditulis di repo/chat.)
+#   3. systemctl daemon-reload && systemctl enable bowo-bridge-worker
+#      && systemctl start bowo-bridge-worker
+#   4. Periksa: systemctl status bowo-bridge-worker ; journalctl -u bowo-bridge-worker -f
+#
+# SUPERVISI: Restart=on-failure (crash -> hidup lagi otomatis) dengan
+# pembatas (maks 5 restart per 10 menit, lalu berhenti supaya tidak
+# berputar tanpa henti bila konfigurasi salah — mis. BRIDGE_SECRET belum
+# diisi: worker exit 3 gagal tertutup, unit berhenti sesudah 5 percobaan).
+# STARTUP: enabled -> hidup otomatis tiap boot VM. Bila VM DIGANTI,
+# ulangi langkah 1-4 di VM baru (file unit ini berversi di repo, jadi
+# tinggal salin + isi EnvironmentFile lagi) — itulah pemulihan startup.
+#
+# CATATAN PATH: path absolut di bawah mengikuti layout VM ini
+# (/home/hatch/workspace/...). Bila workspace VM berbeda, sesuaikan
+# WorkingDirectory, ExecStart, dan EnvironmentFile sebelum enable.
+# Worker TIDAK PERNAH dijalankan Render — Render hanya menjalankan server.js.
+
+[Unit]
+Description=Bowo bridge worker (Telegram grup inti Nusara Studio)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/hatch/workspace/nusara-studio/bot-grup-inti
+ExecStart=/usr/bin/node /home/hatch/workspace/nusara-studio/bot-grup-inti/worker.js
+EnvironmentFile=-/home/hatch/.config/bowo-bridge/bridge.env
+Environment=BRIDGE_POLL_MS=10000
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
