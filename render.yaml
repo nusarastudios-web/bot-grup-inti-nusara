@@ -1,0 +1,22 @@
+# Render Blueprint untuk bot Telegram grup inti Nusara Studio.
+# CARA PAKAI: file ini dibaca Render bila folder ini adalah root repo,
+# atau bila Root Directory di dashboard Render diarahkan ke folder ini.
+# TIDAK ADA nilai rahasia di file ini: env di bawah memakai sync: false,
+# artinya nilainya HARUS diisi di dashboard Render (Environment), bukan
+# di sini, bukan di chat, bukan di repo.
+# PORT TIDAK di-set di sini: Render mengisinya otomatis, server.js membacanya.
+services:
+  - type: web
+    name: bot-grup-inti-nusara
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /health
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
+      - key: GROUP_CHAT_ID
+        sync: false

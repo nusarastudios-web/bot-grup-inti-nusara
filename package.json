@@ -1,0 +1,1 @@
+{"description":"Kerangka server bot Telegram grup inti Nusara Studio — hanya mengantrekan pesan yang memanggil Bowo, tanpa membalas ke grup.","engines":{"node":">=18"},"main":"server.js","name":"bot-grup-inti-nusara","private":true,"scripts":{"start":"node server.js","test":"node test-local.js"},"version":"0.1.0"}

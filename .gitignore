@@ -1,0 +1,8 @@
+# Rahasia dan data antrean JANGAN masuk repo.
+.env
+.env.*
+!.env.example
+node_modules/
+queue/*.jsonl
+!queue/.gitkeep
+*.log
