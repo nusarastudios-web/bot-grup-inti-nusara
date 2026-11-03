@@ -438,8 +438,13 @@ function handleUpdate(update) {
     return { queued: false, reason: 'not_a_group' };
   }
 
-  // DIAM total bila tidak ada kata "Bowo".
-  if (!TRIGGER_RE.test(text)) {
+  // DIAM total bila tidak ada kata "Bowo" — KECUALI untuk agen Prabu.
+  // PERINTAH PAK 3 Nov 14:35: pesan agen Prabu (@AgentAIprabubot) DIANTREKAN
+  // walau tanpa kata "Bowo", supaya debat Bowo-Prabu bisa jalan (jawaban
+  // debat Prabu pada umumnya tidak menyebut "Bowo"). Pengecualian ini
+  // SEMPIT: hanya username persis 'agentai prabubot', hanya di grup
+  // whitelist; semua pengirim lain tetap wajib kata "Bowo".
+  if (!TRIGGER_RE.test(text) && fromUsername !== 'agentai prabubot') {
     log({ event: 'ignored', reason: 'no_trigger', chat_id: chatId, message_id: message.message_id });
     return { queued: false, reason: 'no_trigger' };
   }
