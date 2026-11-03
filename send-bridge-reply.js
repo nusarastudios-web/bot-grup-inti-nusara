@@ -1,4 +1,5 @@
-// Pengirim balasan agent loop ke grup Telegram lewat /bridge/send.
+// Pengirim balasan agent loop ke grup Telegram / chat pribadi pemilik
+// lewat /bridge/send.
 // Dipakai HANYA oleh agent loop Bowo (hook realtime). Skrip ini BUKAN
 // Bowo yang berpikir — ia hanya mengantar jawaban yang sudah disusun
 // agent loop, lewat server Render yang memegang token Telegram.
@@ -10,7 +11,8 @@
 //   atau isi jawaban ke log selain status kirim (ok / error).
 // - JANGAN PERNAH menampilkan file bridge.env dengan cat/echo, JANGAN
 //   menempelkan secret ke chat, argumen, atau repo.
-// - Server yang memvalidasi keras: chat_id harus grup whitelist, reply_to
+// - Server yang memvalidasi keras: chat_id harus sama dengan chat entri
+//   antrean (grup whitelist ATAU chat pribadi pemilik), reply_to
 //   harus pesan antrean nyata, satu balasan per pesan (duplikat
 //   dikembalikan ok+duplicate, bukan kiriman ganda).
 //

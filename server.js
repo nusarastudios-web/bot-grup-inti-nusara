@@ -6,7 +6,7 @@
 //
 // PERILAKU YANG DIPERTAHANKAN dari kerangka (sudah terbukti 3 Nov 2026):
 //   - /health publik (ok + boolean konfigurasi, tanpa nilai rahasia).
-//   - Whitelist GROUP_CHAT_ID; diam total tanpa kata "Bowo".
+//   - Whitelist GROUP_CHAT_ID; chat pribadi pemilik diizinkan; diam total tanpa kata "Bowo" (kecuali DM pemilik & agen Prabu).
 //   - Pemicu kata "Bowo" saja, case-insensitive, batas kata.
 //   - Pesan dari akun bot diabaikan (anti-loop).
 //   - Balas 200 CEPAT ke Telegram, baru proses.
@@ -420,20 +420,29 @@ function handleUpdate(update) {
     return { queued: false, reason: 'no_chat_id' };
   }
 
-  // Whitelist grup: bila belum dikonfigurasi, JANGAN antrekan apa pun.
-  if (!GROUP_CHAT_ID) {
+  // Chat pribadi pemilik (perintah Pak 3 Nov 17:23): DM dari OWNER
+  // diproses TANPA kata pemicu — percakapan langsung dengan Bowo.
+  // SEMPIT: hanya chat type 'private' DAN from_id == OWNER_USER_ID.
+  // DM orang lain tetap ditolak di bawah (bukan grup whitelist).
+  const chatType = message.chat.type;
+  const isOwnerPrivate = chatType === 'private'
+    && OWNER_USER_ID && message.from
+    && String(message.from.id) === String(OWNER_USER_ID);
+
+  // Whitelist grup: bila belum dikonfigurasi, JANGAN antrekan apa pun
+  // (pengecualian: chat pribadi pemilik tetap boleh antre).
+  if (!isOwnerPrivate && !GROUP_CHAT_ID) {
     log({ event: 'ignored', reason: 'group_not_configured', chat_id: chatId, message_id: message.message_id });
     return { queued: false, reason: 'group_not_configured' };
   }
 
-  if (String(chatId) !== String(GROUP_CHAT_ID)) {
+  if (!isOwnerPrivate && String(chatId) !== String(GROUP_CHAT_ID)) {
     log({ event: 'ignored', reason: 'not_whitelisted_group', chat_id: chatId, message_id: message.message_id });
     return { queued: false, reason: 'not_whitelisted_group' };
   }
 
-  // Hanya grup (bukan chat pribadi) yang diproses, sesuai whitelist.
-  const chatType = message.chat.type;
-  if (chatType !== 'group' && chatType !== 'supergroup') {
+  // Hanya grup yang diproses, KECUALI chat pribadi pemilik.
+  if (!isOwnerPrivate && chatType !== 'group' && chatType !== 'supergroup') {
     log({ event: 'ignored', reason: 'not_a_group', chat_id: chatId, message_id: message.message_id });
     return { queued: false, reason: 'not_a_group' };
   }
@@ -444,7 +453,7 @@ function handleUpdate(update) {
   // debat Prabu pada umumnya tidak menyebut "Bowo"). Pengecualian ini
   // SEMPIT: hanya username persis 'agentai prabubot', hanya di grup
   // whitelist; semua pengirim lain tetap wajib kata "Bowo".
-  if (!TRIGGER_RE.test(text) && fromUsername !== 'agentai prabubot') {
+  if (!isOwnerPrivate && !TRIGGER_RE.test(text) && fromUsername !== 'agentai prabubot') {
     log({ event: 'ignored', reason: 'no_trigger', chat_id: chatId, message_id: message.message_id });
     return { queued: false, reason: 'no_trigger' };
   }
@@ -472,13 +481,13 @@ function handleUpdate(update) {
     from_id: message.from ? message.from.id : null,
     from_username: message.from ? (message.from.username || null) : null,
     text,
-    trigger: 'Bowo',
+    trigger: isOwnerPrivate ? 'private' : 'Bowo',
     kind: deriveKind(message.from ? message.from.id : null),
     ...(media ? { media } : {}),
   };
   enqueue(entry);
   log({ event: 'queued', chat_id: chatId, message_id: message.message_id });
-  return { queued: true, reason: 'trigger_matched' };
+  return { queued: true, reason: isOwnerPrivate ? 'private_owner' : 'trigger_matched' };
 }
 
 // --- Endpoint internal /bridge/* (hanya untuk worker, pakai secret). ---
@@ -540,7 +549,8 @@ function handleBridgePending(req, res, url) {
   const afterIdRaw = url.searchParams.get('after_id');
   const afterId = afterIdRaw === null ? 0 : Number(afterIdRaw);
   const entries = readQueueEntries()
-    .filter((e) => String(e.chat_id) === String(GROUP_CHAT_ID))
+    .filter((e) => String(e.chat_id) === String(GROUP_CHAT_ID)
+      || (e.chat_type === 'private' && OWNER_USER_ID && String(e.from_id) === String(OWNER_USER_ID)))
     .filter((e) => {
       if (!since) return true;
       const at = String(e.received_at || '');
@@ -556,6 +566,7 @@ function handleBridgePending(req, res, url) {
     .map((e) => ({
       message_id: e.message_id,
       chat_id: e.chat_id,
+      chat_type: e.chat_type ?? null,
       from_id: e.from_id ?? null,
       from_username: e.from_username ?? null,
       text: e.text,
@@ -643,7 +654,7 @@ function downloadTelegramFile(filePath) {
 //         media?: { catalog?: key, url?: string, type?: photo|video|document,
 //                   caption?: string } }
 // Aturan keras:
-//   - chat_id HARUS sama dengan GROUP_CHAT_ID (tidak pernah ke chat lain).
+//   - Tujuan HARUS chat entri antrean: grup whitelist ATAU chat pribadi pemilik (tidak pernah ke chat lain).
 //   - reply_to HARUS pesan antrean yang nyata (bukan kiriman bebas).
 //   - Satu balasan per pesan antrean (idempotensi via sent.jsonl).
 //   - Media URL HANYA untuk kind=order (Pak/Bowo); anggota hanya katalog.
@@ -664,7 +675,24 @@ async function handleBridgeSend(req, res) {
     sendJson(res, 400, { ok: false, error: 'bad_reply_to' });
     return;
   }
-  if (body.chat_id === undefined || String(body.chat_id) !== String(GROUP_CHAT_ID)) {
+  // reply_to HARUS pesan antrean nyata (server percaya antrean, bukan klaim worker).
+  // Tujuan kirim DIAMBIL dari entri antrean: grup whitelist ATAU chat
+  // pribadi pemilik — tidak pernah ke chat lain.
+  const queued = readQueueEntries().find((e) => Number(e.message_id) === replyTo);
+  if (!queued) {
+    sendJson(res, 400, { ok: false, error: 'unknown_message' });
+    return;
+  }
+  const targetChatId = queued.chat_id;
+  const isGroupTarget = String(targetChatId) === String(GROUP_CHAT_ID);
+  const isOwnerPrivateTarget = queued.chat_type === 'private'
+    && OWNER_USER_ID && String(queued.from_id) === String(OWNER_USER_ID);
+  if (!isGroupTarget && !isOwnerPrivateTarget) {
+    sendJson(res, 403, { ok: false, error: 'chat_not_whitelisted' });
+    return;
+  }
+  if (body.chat_id !== undefined && body.chat_id !== null
+    && String(body.chat_id) !== String(targetChatId)) {
     sendJson(res, 403, { ok: false, error: 'chat_not_whitelisted' });
     return;
   }
@@ -675,12 +703,7 @@ async function handleBridgeSend(req, res) {
     return;
   }
 
-  // reply_to HARUS pesan antrean nyata (server percaya antrean, bukan klaim worker).
-  const queued = readQueueEntries().find((e) => Number(e.message_id) === replyTo);
-  if (!queued) {
-    sendJson(res, 400, { ok: false, error: 'unknown_message' });
-    return;
-  }
+  // (queued sudah dicari di atas; from_mismatch memakai entri itu.)
   if (body.from_id !== undefined && body.from_id !== null
     && String(body.from_id) !== String(queued.from_id ?? '')) {
     sendJson(res, 400, { ok: false, error: 'from_mismatch' });
@@ -738,12 +761,12 @@ async function handleBridgeSend(req, res) {
         }
         fileName = path.basename(resolved.filePath);
       } else {
-        fields = { chat_id: GROUP_CHAT_ID };
+        fields = { chat_id: targetChatId };
         fields[mediaType === 'photo' ? 'photo' : mediaType === 'video' ? 'video' : 'document'] = resolved.url;
       }
       const caption = media.caption !== undefined ? media.caption
         : resolved.caption !== undefined ? resolved.caption : `File: ${media.catalog}`;
-      if (!fields) fields = { chat_id: GROUP_CHAT_ID };
+      if (!fields) fields = { chat_id: targetChatId };
       fields.caption = truncateToCodePoints(String(caption), CAPTION_LIMIT);
     } else {
       // URL HANYA untuk perintah Pak/Bowo (kind=order). Anggota ditolak.
@@ -762,7 +785,7 @@ async function handleBridgeSend(req, res) {
       mediaType = media.type;
       method = mediaType === 'photo' ? 'sendPhoto'
         : mediaType === 'video' ? 'sendVideo' : 'sendDocument';
-      fields = { chat_id: GROUP_CHAT_ID };
+      fields = { chat_id: targetChatId };
       fields[mediaType === 'photo' ? 'photo' : mediaType === 'video' ? 'video' : 'document'] = media.url;
       const caption = media.caption !== undefined ? media.caption : 'File dari Pak/Bowo.';
       fields.caption = truncateToCodePoints(String(caption), CAPTION_LIMIT);
@@ -773,7 +796,7 @@ async function handleBridgeSend(req, res) {
   // tanpa merekam kiriman, tanpa mengisi jendela rate limit.
   if (BRIDGE_DRY_RUN) {
     log({
-      event: 'bridge_send_dry_run', message_id: replyTo, chat_id: GROUP_CHAT_ID,
+      event: 'bridge_send_dry_run', message_id: replyTo, chat_id: targetChatId,
       kind: hasText ? 'text' : mediaType, catalog: logName || undefined,
     });
     sendJson(res, 200, { ok: true, dry_run: true });
@@ -786,7 +809,7 @@ async function handleBridgeSend(req, res) {
       const chunks = splitMessage(body.text);
       let firstId = null;
       for (let i = 0; i < chunks.length; i++) {
-        const chunkFields = { chat_id: GROUP_CHAT_ID, text: chunks[i] };
+        const chunkFields = { chat_id: targetChatId, text: chunks[i] };
         if (i === 0) {
           chunkFields.reply_to_message_id = replyTo;
           chunkFields.allow_sending_without_reply = true;
@@ -806,7 +829,7 @@ async function handleBridgeSend(req, res) {
       }
       recordSent(replyTo, firstId, 'text');
       markRateLimit(fromId, false);
-      log({ event: 'bridge_sent', message_id: replyTo, chat_id: GROUP_CHAT_ID, kind: 'text', chunks: chunks.length });
+      log({ event: 'bridge_sent', message_id: replyTo, chat_id: targetChatId, kind: 'text', chunks: chunks.length });
       sendJson(res, 200, { ok: true, sent_message_id: firstId, chunks: chunks.length, type: 'text' });
       return;
     }
@@ -829,7 +852,7 @@ async function handleBridgeSend(req, res) {
     recordSent(replyTo, sentId, mediaType);
     markRateLimit(fromId, true);
     log({
-      event: 'bridge_sent', message_id: replyTo, chat_id: GROUP_CHAT_ID,
+      event: 'bridge_sent', message_id: replyTo, chat_id: targetChatId,
       kind: mediaType, catalog: logName || undefined,
     });
     sendJson(res, 200, { ok: true, sent_message_id: sentId, type: mediaType });

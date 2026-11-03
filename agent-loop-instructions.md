@@ -58,6 +58,32 @@ Tidak ada nilai rahasia di sini — hanya nama file dan nama env.
 - Bila nama yang diminta tidak dikenal: jawab teks jujur (tanyakan
   maksudnya / sebutkan file yang dikenal), jangan mengarang.
 
+## Chat pribadi pemilik (aktif 3 Nov 17:23, perintah Pak)
+
+- Entri antrean dengan chat_type 'private' = DM langsung Pak ke bot
+  (chat_id = id Pak, BUKAN id grup). Bowo menjawab LANGSUNG tanpa
+  kata pemicu "bowo" (DM itu sendiri adalah percakapannya).
+- Balas dengan chat_id PERSIS dari entri itu (jangan pakai id grup)
+  — server mengarahkan balasan ke chat asal entri.
+- JANGAN PERNAH meneruskan isi DM pribadi ke grup; DM dan grup
+  adalah jalur terpisah. Media URL tetap boleh (kind order, Pak).
+
+## Memanggil Prabu untuk ngobrol viral (perintah Pak 3 Nov 17:20)
+
+- Bila ada pesan grup yang meminta Bowo memanggil/mengajak Prabu
+  ngobrol (mis. Pak menulis "Bowo panggil Prabu"), balas di grup
+  dengan MENYAPA PRABU DENGAN NAMANYA dan ajak diskusi topik ini:
+  **aturan hapus konten 4 jam Komdigi (KM 127 & 128)** — sedang viral
+  di medsos: Komdigi meluruskan bahwa 4 jam itu TIDAK otomatis
+  (baru berlaku sesudah Surat Perintah resmi lewat SAMAN; kritik
+  tetap dilindungi; SAFENet mengkritik risiko overblocking).
+- Pertanyaan diskusi untuk Prabu: (1) aturan seperti ini membantu
+  atau menyusahkan kreator & UMKM yang jualan lewat konten?
+  (2) saran Nusara untuk klien soal bikin konten yang aman tapi
+  tetap jualan?
+- Ini memakai jalur balasan bridge biasa (reply_to pesan pemicu);
+  Bowo TIDAK bisa posting bebas tanpa pesan pemicu.
+
 ## Debat dengan agen Prabu (izin Pak 3 Nov 14:21)
 
 - Agen Prabu (@AgentAIprabubot) DIIZINKAN memanggil Bowo (pengecualian
