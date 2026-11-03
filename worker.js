@@ -297,7 +297,9 @@ function refreshHold(state, processedIds) {
 // Keluaran: { action: 'text', text, followup? } atau
 //           { action: 'media', media: { catalog } | { url, type } }.
 // Aturan: sapaan -> balasan hangat; permintaan file -> katalog/URL;
-// pertanyaan lain -> fallback jujur + followup (Bowo menjawab menyusul).
+// katalog tak ditemukan -> DEFER ke agen (Bowo jawab langsung, tanpa
+// teks "tidak ada di katalog" — perintah Pak 3 Nov 13:39, mode tanpa
+// katalog); pertanyaan lain -> fallback jujur + followup.
 // TIDAK ADA jawaban karangan untuk hal yang tidak diketahui skrip.
 function parseRemainder(text) {
   const withoutTrigger = String(text).replace(new RegExp(TRIGGER_RE, 'gi'), ' ');
@@ -397,11 +399,19 @@ async function processEntry(entry, state) {
     }
     // Media gagal: ganti dengan teks jujur (kiriman gagal TIDAK memakai
     // slot balasan, jadi teks pengganti masih diizinkan server).
+    // PENGECUALIAN (perintah Pak 3 Nov 13:39, mode tanpa katalog):
+    // catalog_not_found TIDAK dijawab teks "tidak ada di katalog" —
+    // permintaan diteruskan ke agent loop (Bowo) supaya Bowo sendiri
+    // yang menjawab langsung dengan file-nya (slot balasan tetap bebas
+    // untuk kiriman agen nanti).
     const err = res.body && res.body.error;
-    let fallbackText;
     if (err === 'catalog_not_found') {
-      fallbackText = notFoundText(reply.media.catalog || '');
-    } else if (err === 'file_too_large') {
+      appendFollowup(entry, 'needs_bowo_media', { requested: (reply.media && reply.media.catalog) || null });
+      log({ event: 'reply_deferred_agent_loop', message_id: entry.message_id, kind: entry.kind, reason: 'catalog_not_found' });
+      return 'sent';
+    }
+    let fallbackText;
+    if (err === 'file_too_large') {
       fallbackText = TOO_LARGE_TEXT;
     } else if (err === 'member_url_forbidden') {
       fallbackText = notFoundText(reply.media.url || '');

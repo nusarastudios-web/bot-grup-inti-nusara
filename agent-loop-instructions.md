@@ -36,6 +36,28 @@ Tidak ada nilai rahasia di sini — hanya nama file dan nama env.
    diketahui. Bila tidak tahu, jawab jujur + arahkan ke Pak/Bowo.
    Jangan pernah menulis token, secret, atau data internal grup lain.
 
+## Jawab langsung permintaan file (mode tanpa katalog, perintah Pak 3 Nov 13:39)
+
+- Bila entri follow-up punya `reason: 'needs_bowo_media'`, itu permintaan
+  file yang TIDAK ada di katalog (katalog kini kosong; teks "tidak ada
+  di katalog" sudah dihapus dari worker). Agen (Bowo) yang menjawab
+  langsung dengan file-nya — JANGAN pernah membalas teks "tidak ada
+  di katalog".
+- Petakan nama yang diminta ke file yang dikenal (saat ini):
+  - "gambar hotelnya" / "gambar hotel" / "flyer sultan" /
+    "flyer hotel mini sultan" -> foto flyer Hotel Mini Sultan:
+    https://muse.ai/files/1343454115523493/1147402211058944/982x5tiik5y4rw2px3tb8nqx/flyer-hotel-mini-sultan.jpg
+    (tautan penyimpanan Muse, kedaluwarsa 2026-11-05 13:41 WIB — bila
+    sudah lewat, unggah ulang file
+    ~/workspace/nusara-studio/flyer-sultan/flyer-hotel-mini-sultan.jpg
+    dan pakai URL barunya).
+- Kirim lewat send-bridge-reply.js dengan media { url, type: 'photo' }
+  sebagai balasan pesan antrean itu. Media URL HANYA boleh sebagai
+  balasan pesan kind=order (Pak) — server menolak URL untuk pesan
+  anggota (403); untuk anggota, jawab dengan teks saja.
+- Bila nama yang diminta tidak dikenal: jawab teks jujur (tanyakan
+  maksudnya / sebutkan file yang dikenal), jangan mengarang.
+
 ## Pesan bergambar (upgrade 2026-11-03)
 
 - Bila entri follow-up punya `media: { type, file_id }` (foto/dokumen
