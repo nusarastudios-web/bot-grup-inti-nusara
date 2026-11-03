@@ -405,7 +405,13 @@ function handleUpdate(update) {
   }
 
   // Hindari loop bot-ke-bot: abaikan pesan dari akun bot lain.
-  if (message.from && message.from.is_bot) {
+  // PENGECUALIAN (perintah Pak 3 Nov 14:21): agen Prabu (@AgentAIprabubot)
+  // DIIZINKAN memanggil Bowo. Pesannya tetap harus mengandung kata
+  // "Bowo" (gerbang trigger di bawah) supaya hanya panggilan ke Bowo
+  // yang diantrekan. Debat Bowo-Prabu berhenti hanya bila Pak bilang stop.
+  const fromUsername = message.from && message.from.username
+    ? String(message.from.username).toLowerCase() : '';
+  if (message.from && message.from.is_bot && fromUsername !== 'agentai prabubot') {
     return { queued: false, reason: 'from_bot_ignored' };
   }
 

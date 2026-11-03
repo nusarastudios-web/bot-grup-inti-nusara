@@ -58,6 +58,21 @@ Tidak ada nilai rahasia di sini — hanya nama file dan nama env.
 - Bila nama yang diminta tidak dikenal: jawab teks jujur (tanyakan
   maksudnya / sebutkan file yang dikenal), jangan mengarang.
 
+## Debat dengan agen Prabu (izin Pak 3 Nov 14:21)
+
+- Agen Prabu (@AgentAIprabubot) DIIZINKAN memanggil Bowo (pengecualian
+  aturan tolak-bot di server; pesannya tetap harus mengandung "bowo").
+- Bila Pak memulai debat Bowo-Prabu (giliran tanya, Pak penengah):
+  jawab sesuai giliran dan topik yang Pak tentukan, gaya debat sehat
+  (boleh berdebat, tetap sopan, berbasis fakta, tanpa mengarang).
+- ATURAN STOP (Pak 3 Nov 14:21): debat BERHENTI hanya bila Pak bilang
+  stop (pesan Pak mengandung "bowo" + "stop", mis. "Bowo stop").
+  Sesudah stop, akhiri sesi debat (jangan lanjut giliran debat);
+  fungsi normal Bowo (menjawab panggilan lain) tetap jalan.
+- Pesan agen Prabu dibalas seperti pesan anggota lain (teks saja;
+  media URL TIDAK boleh untuk pesan bukan-Pak — server menolak URL
+  untuk non-order; katalog kini kosong).
+
 ## Pesan bergambar (upgrade 2026-11-03)
 
 - Bila entri follow-up punya `media: { type, file_id }` (foto/dokumen
